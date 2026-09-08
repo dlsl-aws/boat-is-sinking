@@ -1,0 +1,282 @@
+@import "tailwindcss";
+
+/*
+ * ============================================================================
+ * THE BOAT IS SINKING — design system
+ * ============================================================================
+ *
+ * Three surfaces with genuinely different jobs, one visual world:
+ *
+ *   PROJECTOR  a stage. Spectacle, motion, readable from 12 metres.
+ *   PHONE      a tool held at arm's length while running. One glance, one action.
+ *   DASHBOARD  an instrument panel. Dense, calm, scannable under pressure.
+ *
+ * Committed to dark rather than following the viewer's theme: the projector is
+ * the primary surface, rooms are dim, and a white screen behind a facilitator is
+ * genuinely unpleasant. The phones match so a player glancing between their hand
+ * and the wall stays in one colour world.
+ */
+
+@theme {
+  /* Depth. The palette is literally a water column — light at the surface,
+     crushing dark at the bottom — so "deeper" always reads as "worse". */
+  --color-abyss: #020a14;
+  --color-deep: #04121f;
+  --color-deep-2: #05182a;
+  --color-hull: #0a2439;
+  --color-hull-2: #103150;
+  --color-surface: #16416a;
+  --color-foam: #eaf6ff;
+  --color-mist: #9dc2e0;
+  --color-muted: #6d94b4;
+
+  /* Signals. Danger is a lifebuoy red, safe is a phosphorescent green. */
+  --color-danger: #ff3b5c;
+  --color-danger-dim: #7a1428;
+  --color-safe: #2ee6a8;
+  --color-gold: #ffc94d;
+  --color-beacon: #3aa8ff;
+
+  /* Supplied by next/font in app/layout.tsx, so both are self-hosted. */
+  --font-display: var(--font-fredoka), ui-rounded, "Segoe UI", system-ui, sans-serif;
+  --font-body: var(--font-inter), system-ui, -apple-system, sans-serif;
+
+  --ease-spring: cubic-bezier(0.22, 1.4, 0.36, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+html,
+body {
+  background: var(--color-abyss);
+  color: var(--color-foam);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  min-height: 100dvh;
+  /* Looking down into water: light above, dark below. */
+  background-image:
+    radial-gradient(ellipse 140% 90% at 50% -10%, #1a5480 0%, transparent 55%),
+    linear-gradient(180deg, #062136 0%, #04121f 45%, #020a14 100%);
+  background-attachment: fixed;
+}
+
+h1,
+h2,
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+/* ==========================================================================
+   Caustics — the shifting light pattern on the surface of water.
+   One cheap layered gradient; it makes an otherwise flat background feel wet.
+   ========================================================================== */
+.caustics::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+  background-image:
+    radial-gradient(circle at 20% 12%, rgba(94, 199, 255, 0.16) 0%, transparent 32%),
+    radial-gradient(circle at 78% 8%, rgba(58, 168, 255, 0.12) 0%, transparent 30%),
+    radial-gradient(circle at 50% 0%, rgba(140, 220, 255, 0.1) 0%, transparent 42%);
+  animation: caustics 14s ease-in-out infinite alternate;
+}
+
+@keyframes caustics {
+  0% {
+    transform: translate3d(-2%, 0, 0) scale(1.05);
+    opacity: 0.35;
+  }
+  100% {
+    transform: translate3d(2%, 1.5%, 0) scale(1.12);
+    opacity: 0.6;
+  }
+}
+
+/* ==========================================================================
+   Motion vocabulary
+   ========================================================================== */
+
+@keyframes rise {
+  from {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* A thing arriving with weight — used for anything that should feel *placed*. */
+@keyframes pop-in {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Idle float, so the screen is never completely still. */
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1.2deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(1.2deg);
+  }
+}
+
+/* The last ten seconds. Deliberately uncomfortable. */
+@keyframes alarm-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    text-shadow: 0 0 0 rgba(255, 59, 92, 0);
+  }
+  50% {
+    transform: scale(1.07);
+    text-shadow: 0 0 40px rgba(255, 59, 92, 0.85);
+  }
+}
+
+@keyframes shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-7px); }
+  40%, 60% { transform: translateX(7px); }
+}
+
+/* Going overboard: dropped in, tipped, and left floating — never faded out.
+   The names are the whole point of the reveal, so they stay readable. */
+@keyframes sink {
+  0% {
+    transform: translateY(-26px) rotate(0deg);
+    opacity: 0;
+  }
+  55% {
+    transform: translateY(8px) rotate(9deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) rotate(5deg);
+    opacity: 1;
+  }
+}
+
+@keyframes glow-safe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(46, 230, 168, 0.5), 0 0 28px rgba(46, 230, 168, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(46, 230, 168, 0.9), 0 0 56px rgba(46, 230, 168, 0.5);
+  }
+}
+
+@keyframes attention {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255, 201, 77, 0.6), 0 0 22px rgba(255, 201, 77, 0.2); }
+  50%      { box-shadow: 0 0 0 2px rgba(255, 201, 77, 1), 0 0 48px rgba(255, 201, 77, 0.45); }
+}
+
+@keyframes sweep {
+  from { background-position: -180% 0; }
+  to   { background-position: 280% 0; }
+}
+
+@keyframes drift {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.animate-rise      { animation: rise 0.4s var(--ease-out-quart) both; }
+.animate-pop       { animation: pop-in 0.45s var(--ease-spring) both; }
+.animate-bob       { animation: bob 4s ease-in-out infinite; }
+.animate-alarm     { animation: alarm-pulse 0.75s ease-in-out infinite; }
+.animate-shake     { animation: shake 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+.animate-sink      { animation: sink 0.8s var(--ease-spring) both; }
+.animate-glow-safe { animation: glow-safe 2s ease-in-out infinite; }
+.animate-attention { animation: attention 1.3s ease-in-out infinite; }
+
+/* Stagger helper: children arrive in sequence rather than all at once. */
+.stagger > * {
+  animation: pop-in 0.45s var(--ease-spring) both;
+}
+.stagger > *:nth-child(1)  { animation-delay: 0.02s; }
+.stagger > *:nth-child(2)  { animation-delay: 0.06s; }
+.stagger > *:nth-child(3)  { animation-delay: 0.10s; }
+.stagger > *:nth-child(4)  { animation-delay: 0.14s; }
+.stagger > *:nth-child(5)  { animation-delay: 0.18s; }
+.stagger > *:nth-child(6)  { animation-delay: 0.22s; }
+.stagger > *:nth-child(7)  { animation-delay: 0.26s; }
+.stagger > *:nth-child(8)  { animation-delay: 0.30s; }
+.stagger > *:nth-child(9)  { animation-delay: 0.34s; }
+.stagger > *:nth-child(10) { animation-delay: 0.38s; }
+.stagger > *:nth-child(n + 11) { animation-delay: 0.42s; }
+
+/* A slow light sweep across a surface — used on the captain's code card so it
+   catches the eye across a crowded room. */
+.shimmer {
+  background-image: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.14) 42%,
+    rgba(255, 255, 255, 0.28) 50%,
+    rgba(255, 255, 255, 0.14) 58%,
+    transparent 80%
+  );
+  background-size: 220% 100%;
+  animation: sweep 2.6s linear infinite;
+}
+
+/* ==========================================================================
+   Accessibility
+   ========================================================================== */
+
+/* Motion here is decorative, never load-bearing: every state is also carried by
+   text, colour AND an icon, so removing animation loses nothing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .caustics::before { animation: none; }
+}
+
+/* 16px minimum stops iOS zooming the page when a player taps the code field
+   with ten seconds left. */
+input,
+button,
+select,
+textarea {
+  font-size: 16px;
+  font-family: inherit;
+}
+
+/* The projector is read from the back of a room; this scales the whole surface
+   with the viewport so nothing is ever tuned to one screen size. */
+.display-scale {
+  font-size: clamp(16px, 1.35vw, 30px);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
