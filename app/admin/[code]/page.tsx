@@ -11,6 +11,7 @@ import {
   SymbolBadge,
 } from "@/app/components/ui";
 import { QrCode } from "@/app/components/QrCode";
+import { SettingsPanel } from "@/app/components/SettingsPanel";
 import { useGameState, type ClientState } from "@/lib/client/useGameState";
 import { useCountdown, usePhaseDeadline } from "@/lib/client/useCountdown";
 import { evaluateRound, projectGame } from "@/lib/game/plan";
@@ -73,6 +74,7 @@ export default function AdminPage() {
       />
       <Counts state={state} />
       <Controls code={code} state={state} onChanged={refetch} />
+      <SettingsPanel code={code} state={state} onChanged={refetch} />
       {round && round.phase === "scramble" && <BoatGrid state={state} />}
       <Roster code={code} state={state} onChanged={refetch} />
       <Plan state={state} />
