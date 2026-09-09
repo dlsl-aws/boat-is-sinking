@@ -243,6 +243,7 @@ export async function maybeResolveRound(
  */
 export async function maybeAdvancePhase(room: RoomRow): Promise<boolean> {
   if (!room.current_round_id) return false;
+  if (room.status === "finished") return false;
   const supabase = db();
   const config = parseConfig(room.config);
 
@@ -254,38 +255,53 @@ export async function maybeAdvancePhase(room: RoomRow): Promise<boolean> {
 
   if (!roundRow) return false;
   const phase = roundRow.phase as string;
-  if (phase !== "resolve" && phase !== "prompt") return false;
-
-  const { data } = await supabase.rpc("advance_phase", { p_round_id: roundRow.id });
-  const result = data as { moved: boolean; phase?: string } | null;
-  if (!result?.moved) return false;
+  // `done` is still processed here, not just `resolve`/`prompt`: the game-end
+  // decision below can fail (a transient query error, or `finish_game` itself
+  // failing) and must be retried on a later poll. If we returned early for
+  // `done`, a single failure would leave the game undecidable forever.
+  if (phase !== "resolve" && phase !== "prompt" && phase !== "done") return false;
 
   const roundId = roundRow.id as string;
 
-  if (result.phase === "prompt") {
-    const { data: fresh } = await supabase
-      .from("rounds")
-      .select("prompt_ends_at")
-      .eq("id", roundId)
-      .maybeSingle();
-    await broadcast(room.id, {
-      type: "prompt:started",
-      roundId,
-      promptId: roundRow.prompt_id as string,
-      endsAt: (fresh?.prompt_ends_at as string) ?? new Date().toISOString(),
-    });
-    return true;
-  }
+  if (phase === "resolve" || phase === "prompt") {
+    const { data } = await supabase.rpc("advance_phase", { p_round_id: roundId });
+    const result = data as { moved: boolean; phase?: string } | null;
+    if (!result?.moved) {
+      console.warn(`advance_phase did not move round ${roundId} (phase: ${phase})`);
+      return false;
+    }
 
-  await broadcast(room.id, { type: "round:done", roundId });
+    if (result.phase === "prompt") {
+      const { data: fresh } = await supabase
+        .from("rounds")
+        .select("prompt_ends_at")
+        .eq("id", roundId)
+        .maybeSingle();
+      await broadcast(room.id, {
+        type: "prompt:started",
+        roundId,
+        promptId: roundRow.prompt_id as string,
+        endsAt: (fresh?.prompt_ends_at as string) ?? new Date().toISOString(),
+      });
+      return true;
+    }
+
+    // result.phase === "done": fall through to the game-end decision below.
+    await broadcast(room.id, { type: "round:done", roundId });
+  }
 
   // The game is over when no further round could thin the field. Recomputed
   // from the same pure function the resolution used, so the two cannot disagree.
-  const { data: aliveRows } = await supabase
+  const { data: aliveRows, error: aliveError } = await supabase
     .from("players")
     .select("id")
     .eq("room_id", room.id)
     .eq("status", "alive");
+
+  if (aliveError) {
+    console.warn(`failed to read alive players for room ${room.id}: ${aliveError.message}`);
+    return false;
+  }
 
   const survivors = (aliveRows ?? []).length;
   const nextShape = suggestShape(survivors, room.initial_alive ?? survivors, {
@@ -304,7 +320,11 @@ export async function maybeAdvancePhase(room: RoomRow): Promise<boolean> {
   });
 
   if (gameEnding) {
-    await supabase.rpc("finish_game", { p_room_id: room.id });
+    const { error: finishError } = await supabase.rpc("finish_game", { p_room_id: room.id });
+    if (finishError) {
+      console.warn(`finish_game failed for room ${room.id}: ${finishError.message}`);
+      return false;
+    }
     await broadcast(room.id, { type: "game:over" });
   }
 
