@@ -12,7 +12,7 @@ import {
 } from "@/app/components/ui";
 import { QrCode } from "@/app/components/QrCode";
 import { useGameState, type ClientState } from "@/lib/client/useGameState";
-import { useCountdown, useResolveOnDeadline } from "@/lib/client/useCountdown";
+import { useCountdown, usePhaseDeadline } from "@/lib/client/useCountdown";
 import { evaluateRound, projectGame } from "@/lib/game/plan";
 import { useGameFeedback } from "@/lib/client/useGameFeedback";
 
@@ -33,7 +33,7 @@ export default function AdminPage() {
     round?.phase === "scramble" ? round.endsAt : null,
     serverNow,
   );
-  useResolveOnDeadline(code, round?.id, round?.phase, expired, refetch);
+  usePhaseDeadline(code, round?.id, round?.phase, expired, refetch);
   useGameFeedback(state, "display");
 
   if (error === "no-such-room") {

@@ -13,7 +13,7 @@ import {
 } from "@/app/components/display-views";
 import { Confetti } from "@/app/components/Confetti";
 import { useGameState } from "@/lib/client/useGameState";
-import { useCountdown, useResolveOnDeadline } from "@/lib/client/useCountdown";
+import { useCountdown, usePhaseDeadline } from "@/lib/client/useCountdown";
 import { useCountdownTicks, useGameFeedback } from "@/lib/client/useGameFeedback";
 
 /**
@@ -39,8 +39,21 @@ export default function DisplayPage() {
     scrambling ? round.endsAt : null,
     serverNow,
   );
+  // The reveal's own deadline is not projected, so a short local timer fires the
+  // advance: the server still refuses until its clock agrees.
+  const revealExpired = round?.phase === "resolve";
+  const promptExpired =
+    round?.phase === "prompt" &&
+    round.promptEndsAt != null &&
+    new Date(round.promptEndsAt).getTime() <= serverNow();
 
-  useResolveOnDeadline(code, round?.id, round?.phase, expired, refetch);
+  usePhaseDeadline(
+    code,
+    round?.id,
+    round?.phase,
+    scrambling ? expired : revealExpired || promptExpired,
+    refetch,
+  );
   useGameFeedback(state, "display");
   useCountdownTicks(
     remainingSeconds,
