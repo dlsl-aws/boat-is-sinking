@@ -9,3 +9,8 @@ build/
 next-env.d.ts
 .vercel
 .DS_Store
+test-results/
+playwright-report/
+/blob-report/
+.playwright/
+.claude/
