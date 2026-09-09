@@ -18,8 +18,8 @@ export const BOAT_CODE_LENGTH = 4;
 
 /**
  * Rejection sampling rather than `% alphabet.length`. Modulo would bias toward
- * the first `256 % 25` characters — irrelevant for fairness here, but this is
- * the same helper that generates session tokens, so it should be unbiased.
+ * the first `256 % 25` characters — irrelevant for fairness at this scale, but
+ * an unbiased generator costs nothing here.
  */
 function randomChars(length: number): string {
   const alphabet = CODE_ALPHABET;
