@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it } from "vitest";
  * are the properties the row lock exists to preserve under concurrency.
  */
 
-const MIGRATIONS = ["0001_init.sql", "0002_rpc.sql", "0003_rounds.sql"];
+const MIGRATIONS = ["0001_init.sql", "0002_rpc.sql", "0003_rounds.sql", "0004_seats.sql"];
 
 type Db = PGlite;
 
@@ -255,6 +255,39 @@ describe("claim_seat", () => {
       ok: false,
       reason: "not-playing",
     });
+  });
+
+  it("still seats a player after a kick freed a seat mid-scramble", async () => {
+    // Kicking cascade-deletes the seat row, so seat_index can no longer be
+    // derived from count(*) — it would collide with a seat that still exists.
+    const { roundId, boat, playerIds } = await seedScramble(db, { capacity: 4, holders: 5 });
+    await captain(db, boat.id, playerIds[0]!);
+    await board(db, roundId, boat.code, playerIds[1]!);
+    await board(db, roundId, boat.code, playerIds[2]!);
+
+    await db.query(`delete from players where id = $1`, [playerIds[1]!]);
+
+    const result = await board(db, roundId, boat.code, playerIds[3]!);
+    expect(result).toMatchObject({ ok: true });
+
+    const seats = await db.query<{ seat_index: number }>(`select seat_index from seats`);
+    const indexes = seats.rows.map((s) => s.seat_index).sort((a, b) => a - b);
+    expect(indexes).toEqual([0, 2, 3]);
+  });
+
+  it("locks on the seat count reaching capacity, not on the seat index", async () => {
+    // With indexes outrunning positions after a kick, an index-based lock would
+    // seal a boat that still has a free seat.
+    const { roundId, boat, playerIds } = await seedScramble(db, { capacity: 3, holders: 5 });
+    await captain(db, boat.id, playerIds[0]!);
+    await board(db, roundId, boat.code, playerIds[1]!);
+    await db.query(`delete from players where id = $1`, [playerIds[1]!]);
+
+    const third = await board(db, roundId, boat.code, playerIds[2]!);
+    expect(third).toMatchObject({ ok: true, filled: 2, locked: false });
+
+    const fourth = await board(db, roundId, boat.code, playerIds[3]!);
+    expect(fourth).toMatchObject({ ok: true, filled: 3, locked: true });
   });
 });
 

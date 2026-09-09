@@ -22,7 +22,7 @@ import { seededRng } from "../game/rng";
  * and sometimes never board at all.
  */
 
-const MIGRATIONS = ["0001_init.sql", "0002_rpc.sql", "0003_rounds.sql"];
+const MIGRATIONS = ["0001_init.sql", "0002_rpc.sql", "0003_rounds.sql", "0004_seats.sql"];
 
 async function freshDb(): Promise<PGlite> {
   const db = new PGlite();
