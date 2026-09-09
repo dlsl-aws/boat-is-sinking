@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { joinUrlFor, loadRoom, ok, resolveViewer } from "@/lib/api";
 import { buildGameState, findRoomByCode } from "@/lib/db/state";
-import { maybeResolveRound, promoteAutoCaptains } from "@/lib/db/rounds";
+import { maybeAdvancePhase, maybeResolveRound, promoteAutoCaptains } from "@/lib/db/rounds";
 import { parseConfig } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -46,8 +46,12 @@ async function readState(code: string) {
     }
     const resolved = await maybeResolveRound(room);
     if (resolved) {
-      // Resolution changes room status and round phase, so re-read rather than
-      // returning the snapshot we took before it ran.
+      room = (await findRoomByCode(code)) ?? room;
+    }
+    // The reveal and the icebreaker end on their own deadlines, noticed here
+    // because nothing else is awake to notice them.
+    const advanced = await maybeAdvancePhase(room);
+    if (advanced) {
       room = (await findRoomByCode(code)) ?? room;
     }
   }

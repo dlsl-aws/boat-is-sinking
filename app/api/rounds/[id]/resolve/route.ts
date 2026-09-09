@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { fail, loadRoom, ok, readJson, resolveViewer } from "@/lib/api";
-import { maybeResolveRound } from "@/lib/db/rounds";
+import { maybeAdvancePhase, maybeResolveRound } from "@/lib/db/rounds";
 import { db } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -34,16 +34,19 @@ export async function POST(
   if ("response" in loaded) return loaded.response;
   const { room } = loaded;
 
+  let forced = false;
   if (body.data.force) {
     const viewer = await resolveViewer(room);
     if (viewer.role !== "host") return fail("not-the-host", 403);
-    await db()
-      .from("rounds")
-      .update({ ends_at: new Date().toISOString() })
-      .eq("id", roundId)
-      .eq("room_id", room.id);
+    // Written by Postgres, because Postgres is what checks it.
+    await db().rpc("end_round_now", {
+      p_round_id: roundId,
+      p_room_id: room.id,
+    });
+    forced = true;
   }
 
-  const resolved = await maybeResolveRound(room);
-  return ok({ resolved });
+  const resolved = await maybeResolveRound(room, { skipClockPrecheck: forced });
+  const advanced = await maybeAdvancePhase(room);
+  return ok({ resolved, advanced });
 }
