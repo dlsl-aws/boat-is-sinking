@@ -200,8 +200,11 @@ can never get aboard.
   capacity` is index-based, so once indices outrun positions after a kick it
   locks a boat that is not full. It becomes `v_filled + 1 >= v_boat.capacity`.
 
-Cosmetic follow-on: the dashboard renders `#{seat.index + 1}`, which would read
-"#5" on a four-seat boat. It renders list position instead.
+An earlier draft of this spec claimed a cosmetic follow-on: that the dashboard's
+`#{seat.index + 1}` would read "#5" on a four-seat boat once indices outran
+positions. Checking it, that is wrong. `AdminBoat.seatedPlayerIds` is a list, and
+the dashboard numbers it by array position (`seatedPlayerIds.forEach((id, index)
+=> ...)`), never by the stored `seat_index`. No change is needed there.
 
 ## 4. Ending a round early
 
