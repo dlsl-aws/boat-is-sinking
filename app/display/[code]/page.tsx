@@ -9,6 +9,7 @@ import {
   PromptPhase,
   Scramble,
   Shell,
+  Standby,
   Winners,
 } from "@/app/components/display-views";
 import { Confetti } from "@/app/components/Confetti";
@@ -114,8 +115,10 @@ export default function DisplayPage() {
           />
         ) : round?.phase === "prompt" ? (
           <PromptPhase state={state} serverNow={serverNow} />
-        ) : round?.phase === "resolve" || round?.phase === "done" ? (
+        ) : round?.phase === "resolve" ? (
           <Aftermath state={state} />
+        ) : round?.phase === "done" ? (
+          <Standby state={state} />
         ) : (
           <Lobby state={state} />
         )}

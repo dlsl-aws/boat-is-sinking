@@ -300,3 +300,26 @@ export function Winners({ state }: { state: ClientState }) {
     </div>
   );
 }
+
+/**
+ * Between rounds.
+ *
+ * The reveal has had its moment and the icebreaker is over; replaying "3
+ * overboard!" here would step on both. This holds the room's attention on the
+ * count that matters while the facilitator decides what to do next.
+ */
+export function Standby({ state }: { state: ClientState }) {
+  const alive = state.players.filter((p) => p.status === "alive").length;
+
+  return (
+    <div className="w-full max-w-[85rem] text-center">
+      <div className="animate-bob text-[7vw] leading-none" aria-hidden>
+        ⛵
+      </div>
+      <p className="font-display mt-[2vh] text-[5vw] leading-none font-bold text-safe">
+        {alive} still afloat
+      </p>
+      <p className="mt-[3vh] text-[2vw] text-mist">Next round coming up…</p>
+    </div>
+  );
+}

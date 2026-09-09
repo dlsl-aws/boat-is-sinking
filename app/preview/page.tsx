@@ -10,6 +10,7 @@ import {
   PromptPhase,
   Scramble,
   Shell,
+  Standby,
   Winners,
 } from "@/app/components/display-views";
 import { CodeCard, TimeBar } from "@/app/components/phone-views";
@@ -95,6 +96,7 @@ type Scene =
   | "scramble-calm"
   | "scramble-urgent"
   | "aftermath"
+  | "standby"
   | "prompt"
   | "winners";
 
@@ -105,6 +107,7 @@ const SCENES: { id: Scene; label: string }[] = [
   { id: "scramble-calm", label: "Scramble" },
   { id: "scramble-urgent", label: "Scramble · final 10s" },
   { id: "aftermath", label: "Reveal" },
+  { id: "standby", label: "Between rounds" },
   { id: "prompt", label: "Icebreaker" },
   { id: "winners", label: "Winners" },
 ];
@@ -180,6 +183,7 @@ export default function PreviewPage() {
             />
           )}
           {scene === "aftermath" && <Aftermath state={aftermathState} />}
+          {scene === "standby" && <Standby state={aftermathState} />}
           {scene === "prompt" && <PromptPhase state={mockState()} serverNow={serverNow} />}
           {scene === "winners" && <Winners state={winnersState} />}
         </Shell>
