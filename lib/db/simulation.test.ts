@@ -7,6 +7,7 @@ import { generateDistinctBoatCodes } from "../game/codes";
 import { suggestShape } from "../game/plan";
 import { resolveRound, type ResolvableBoat } from "../game/resolve";
 import { seededRng } from "../game/rng";
+import { planPostRound } from "../game/postround";
 
 /**
  * A whole game, end to end, against real Postgres.
@@ -58,6 +59,7 @@ type RoundLog = {
   survivors: number;
   eliminated: number;
   autoCaptains: number;
+  phases: string[];
 };
 
 async function playGame(db: PGlite, options: SimOptions) {
@@ -202,11 +204,53 @@ async function playGame(db: PGlite, options: SimOptions) {
 
     const resolution = resolveRound(alivePlayerIds, resolvable, "lenient");
 
-    await db.query(`select apply_resolution($1, $2, $3, now(), null)`, [
-      roundId,
-      resolution.survivorIds,
-      resolution.eliminatedIds,
-    ]);
+    const talkingBoatCount = resolution.boats.filter(
+      (b) => !b.sank && b.survivorIds.length > 1,
+    ).length;
+    const nextShape = suggestShape(resolution.survivorIds.length, playerCount);
+    const { runPrompt } = planPostRound({
+      survivorCount: resolution.survivorIds.length,
+      talkingBoatCount,
+      targetWinners: 2,
+      promptsEnabled: true,
+      hasPromptId: true,
+      nextShape,
+    });
+
+    await db.query(
+      `select apply_resolution($1, $2, $3, now() + interval '6 seconds', ${
+        runPrompt ? "now() + interval '51 seconds'" : "null"
+      })`,
+      [roundId, resolution.survivorIds, resolution.eliminatedIds],
+    );
+
+    // Walk the round through its phases the way a room of clients does, winding
+    // each deadline back rather than waiting for it.
+    const phases: string[] = ["resolve"];
+    for (let hop = 0; hop < 3; hop++) {
+      // `least()` ignores nulls in Postgres rather than propagating them, so a
+      // round with no icebreaker (prompt_ends_at null) must be left alone here
+      // — otherwise this wind-back would fabricate a past deadline out of thin
+      // air and walk the round through a `prompt` phase it was never meant to
+      // have.
+      await db.query(
+        `update rounds
+            set reveal_ends_at = least(reveal_ends_at, now() - interval '1 second'),
+                prompt_ends_at = case
+                  when prompt_ends_at is null then null
+                  else least(prompt_ends_at, now() - interval '1 second')
+                end
+          where id = $1`,
+        [roundId],
+      );
+      const moved = await call<{ moved: boolean; phase?: string }>(
+        db,
+        `select advance_phase($1) as r`,
+        [roundId],
+      );
+      if (!moved.moved) break;
+      phases.push(moved.phase!);
+    }
 
     log.push({
       index: created.roundIndex,
@@ -216,6 +260,7 @@ async function playGame(db: PGlite, options: SimOptions) {
       survivors: resolution.survivorIds.length,
       eliminated: resolution.eliminatedIds.length,
       autoCaptains,
+      phases,
     });
   }
 
@@ -249,6 +294,16 @@ describe("full game simulation", () => {
     for (let i = 1; i < log.length; i++) {
       expect(log[i]!.alive).toBe(log[i - 1]!.survivors);
     }
+
+    for (const round of log) {
+      // Every round reaches a real end, and the reveal is always seen.
+      expect(round.phases[0], `round ${round.index}`).toBe("resolve");
+      expect(round.phases.at(-1), `round ${round.index}`).toBe("done");
+    }
+
+    // The round that ends the game runs no icebreaker: it used to set the
+    // prompt phase and have finish_game yank it off the winners' screens.
+    expect(log.at(-1)!.phases).not.toContain("prompt");
   }, 60_000);
 
   it("never strands a cohort, even when nobody ever volunteers", async () => {
@@ -306,15 +361,31 @@ describe("full game simulation", () => {
     // The bug this guards: a late joiner was parked as a spectator and nothing
     // ever promoted them, so the phone's "You're up next round" was a lie and
     // they sat out the whole game.
+    //
+    // `startRound` itself cannot be called from these tests — it talks to
+    // Supabase via supabase-js, and these tests run against PGlite — so this
+    // is the honest best available coverage: it runs the exact promote-then-
+    // select sequence `startRound` uses, then builds a real round from the
+    // resulting alive list via `create_round` and checks the latecomer
+    // actually receives a seat assignment, not just a flipped status column.
     const db = await freshDb();
     const room = (
       await db.query<{ id: string }>(
         `insert into rooms (code, host_token_hash) values ('LATE24', 'h') returning id`,
       )
     ).rows[0]!;
+    const latecomer = (
+      await db.query<{ id: string }>(
+        `insert into players (room_id, display_name, name_key, avatar_seed, avatar_color, session_token_hash, status)
+         values ($1, 'Latecomer', 'latecomer', '0', '#fff', 'tok-late', 'spectator') returning id`,
+        [room.id],
+      )
+    ).rows[0]!;
+    // An already-alive player, so the round built below has enough people to
+    // form a real boat (a boat needs at least MIN_GROUP_SIZE occupants).
     await db.query(
       `insert into players (room_id, display_name, name_key, avatar_seed, avatar_color, session_token_hash, status)
-       values ($1, 'Latecomer', 'latecomer', '0', '#fff', 'tok-late', 'spectator')`,
+       values ($1, 'Incumbent', 'incumbent', '0', '#fff', 'tok-inc', 'alive')`,
       [room.id],
     );
 
@@ -324,18 +395,151 @@ describe("full game simulation", () => {
       `select count(*)::int as count from players where room_id = $1 and status = 'alive'`,
       [room.id],
     );
-    expect(beforeAlive.rows[0]!.count).toBe(0);
+    expect(beforeAlive.rows[0]!.count).toBe(1);
 
+    // The same promote-then-select sequence `startRound` runs: promotion has
+    // to happen before the alive list is read, or the latecomer misses this
+    // round's assignment entirely.
     await db.query(
       `update players set status = 'alive' where room_id = $1 and status = 'spectator'`,
       [room.id],
     );
 
-    // AFTER: the same query now finds them.
-    const alive = await db.query<{ count: number }>(
-      `select count(*)::int as count from players where room_id = $1 and status = 'alive'`,
+    const aliveRows = await db.query<{ id: string }>(
+      `select id from players where room_id = $1 and status = 'alive' order by id`,
       [room.id],
     );
-    expect(alive.rows[0]!.count).toBe(1);
+    const alivePlayerIds = aliveRows.rows.map((r) => r.id);
+    expect(alivePlayerIds.length).toBe(2);
+
+    // Built directly rather than through `suggestShape` — the planner refuses
+    // any shape that eliminates nobody, and a single boat holding everyone
+    // never does. One boat sized to hold the whole (tiny) alive list is all
+    // this test needs from `create_round`.
+    const shape = { targetGroupSize: alivePlayerIds.length, boatsRemoved: 0 };
+
+    const assignment = assignSymbols(alivePlayerIds, shape, { symbolOffset: 0 });
+    expect(assignment.kind).toBe("ok");
+    if (assignment.kind !== "ok") return;
+
+    const codes = generateDistinctBoatCodes(assignment.boats.length);
+    const boatsPayload = assignment.boats.map((boat, i) => ({
+      symbolId: boat.symbol.id,
+      capacity: boat.capacity,
+      code: codes[i]!,
+      playerIds: boat.playerIds,
+    }));
+
+    const created = await call<{ roundId: string; roundIndex: number }>(
+      db,
+      `select create_round($1, $2, $3, 45, 5, null, $4::jsonb) as r`,
+      [room.id, shape.targetGroupSize, shape.boatsRemoved, JSON.stringify(boatsPayload)],
+    );
+
+    // AFTER: the latecomer must actually hold a symbol and a boat in this
+    // round's assignments — not merely a status column that says 'alive'.
+    const assignmentRows = await db.query<{ player_id: string; boat_id: string; symbol_id: string }>(
+      `select player_id, boat_id, symbol_id from assignments where round_id = $1 and player_id = $2`,
+      [created.roundId, latecomer.id],
+    );
+    expect(assignmentRows.rows.length).toBe(1);
+    expect(assignmentRows.rows[0]!.boat_id).toBeTruthy();
+    expect(assignmentRows.rows[0]!.symbol_id).toBeTruthy();
+  });
+
+  it("retries the done-phase decision harmlessly after a failed finish_game", async () => {
+    // The bug this guards: `finish_game` can fail after a round has already
+    // moved to `done`. `advance_phase` is deliberately still willing to look
+    // at a `done` round, so the caller can retry the ending decision on the
+    // next poll instead of the game becoming stuck forever. Nothing exercised
+    // that path, so a change that made advance_phase reject a `done` round
+    // outright — or, worse, move it back into `prompt` — would have gone
+    // unnoticed.
+    const db = await freshDb();
+    const room = (
+      await db.query<{ id: string }>(
+        `insert into rooms (code, host_token_hash) values ('DONE24', 'h') returning id`,
+      )
+    ).rows[0]!;
+    const playerIds: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const row = (
+        await db.query<{ id: string }>(
+          `insert into players (room_id, display_name, name_key, avatar_seed, avatar_color, session_token_hash)
+           values ($1, $2, $3, '0', '#fff', $4) returning id`,
+          [room.id, `Finisher ${i}`, `finisher ${i}`, `tok-fin-${i}`],
+        )
+      ).rows[0]!;
+      playerIds.push(row.id);
+    }
+
+    // Built directly rather than through `suggestShape`, for the same reason
+    // as above: a single boat holding everyone eliminates nobody, which the
+    // planner refuses to propose, but is exactly what this test needs from
+    // `create_round`.
+    const shape = { targetGroupSize: playerIds.length, boatsRemoved: 0 };
+    const assignment = assignSymbols(playerIds, shape, { symbolOffset: 0 });
+    expect(assignment.kind).toBe("ok");
+    if (assignment.kind !== "ok") return;
+    const codes = generateDistinctBoatCodes(assignment.boats.length);
+    const boatsPayload = assignment.boats.map((boat, i) => ({
+      symbolId: boat.symbol.id,
+      capacity: boat.capacity,
+      code: codes[i]!,
+      playerIds: boat.playerIds,
+    }));
+    const created = await call<{ roundId: string }>(
+      db,
+      `select create_round($1, $2, $3, 45, 5, null, $4::jsonb) as r`,
+      [room.id, shape.targetGroupSize, shape.boatsRemoved, JSON.stringify(boatsPayload)],
+    );
+    const roundId = created.roundId;
+
+    // Drive the round to `done` with no icebreaker (this round ends the game).
+    await db.query(`select apply_resolution($1, $2, $3, now() - interval '1 second', null)`, [
+      roundId,
+      playerIds,
+      [],
+    ]);
+    const firstMove = await call<{ moved: boolean; phase?: string }>(
+      db,
+      `select advance_phase($1) as r`,
+      [roundId],
+    );
+    expect(firstMove.moved).toBe(true);
+    expect(firstMove.phase).toBe("done");
+
+    const phaseAfterFirst = await db.query<{ phase: string }>(
+      `select phase from rounds where id = $1`,
+      [roundId],
+    );
+    expect(phaseAfterFirst.rows[0]!.phase).toBe("done");
+
+    // Simulate `finish_game` failing: nothing else changes the round, and the
+    // next poll calls advance_phase again on a round that is already `done`.
+    for (let retry = 0; retry < 3; retry++) {
+      const moved = await call<{ moved: boolean; phase?: string }>(
+        db,
+        `select advance_phase($1) as r`,
+        [roundId],
+      );
+      expect(moved.moved, `retry ${retry}`).toBe(false);
+
+      const phaseNow = await db.query<{ phase: string }>(
+        `select phase from rounds where id = $1`,
+        [roundId],
+      );
+      // Critically: the extra calls must never re-enter `prompt`, and the
+      // round's phase and resolution must stay exactly as they were.
+      expect(phaseNow.rows[0]!.phase, `retry ${retry}`).toBe("done");
+    }
+
+    const players = await db.query<{ status: string }>(
+      `select status from players where room_id = $1`,
+      [room.id],
+    );
+    for (const p of players.rows) {
+      expect(p.status).toBe("alive");
+    }
   });
 });
