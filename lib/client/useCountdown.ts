@@ -44,28 +44,35 @@ export function useCountdown(
 }
 
 /**
- * Ask the server to resolve a round once its deadline passes.
+ * Ask the server to move a round on, once the current phase's deadline passes.
  *
- * Vercel has no background worker, so the deadline has to be noticed by a
- * client. Every open client fires this, and `begin_resolve` grants ownership to
- * exactly one of them — the redundancy is the point, because it means the round
- * still ends if any single browser is asleep.
+ * Vercel has no background worker, so every deadline has to be noticed by a
+ * client. Every open client fires this and the database grants the transition
+ * to exactly one of them — the redundancy is the point, because it means a
+ * round still progresses if any single browser is asleep.
+ *
+ * The fired-once guard is keyed on round id *and* phase, so one round can fire
+ * three times across its life: at the scramble deadline, at the reveal's, and
+ * at the icebreaker's.
  *
  * A short jittered delay keeps 40 phones from arriving in the same millisecond.
  */
-export function useResolveOnDeadline(
+export function usePhaseDeadline(
   roomCode: string,
   roundId: string | null | undefined,
   phase: string | null | undefined,
   expired: boolean,
-  onResolved: () => void,
+  onAdvanced: () => void,
 ) {
   const firedFor = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!roundId || phase !== "scramble" || !expired) return;
-    if (firedFor.current === roundId) return;
-    firedFor.current = roundId;
+    if (!roundId || !phase || !expired) return;
+    if (phase !== "scramble" && phase !== "resolve" && phase !== "prompt") return;
+
+    const key = `${roundId}:${phase}`;
+    if (firedFor.current === key) return;
+    firedFor.current = key;
 
     const timer = setTimeout(
       () => {
@@ -74,7 +81,7 @@ export function useResolveOnDeadline(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ roomCode }),
         })
-          .then(onResolved)
+          .then(onAdvanced)
           .catch(() => {
             // Another client will get there; the slow poll is the backstop.
           });
@@ -83,5 +90,5 @@ export function useResolveOnDeadline(
     );
 
     return () => clearTimeout(timer);
-  }, [roomCode, roundId, phase, expired, onResolved]);
+  }, [roomCode, roundId, phase, expired, onAdvanced]);
 }

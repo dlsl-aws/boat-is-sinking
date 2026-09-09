@@ -9,11 +9,12 @@ import {
   PromptPhase,
   Scramble,
   Shell,
+  Standby,
   Winners,
 } from "@/app/components/display-views";
 import { Confetti } from "@/app/components/Confetti";
 import { useGameState } from "@/lib/client/useGameState";
-import { useCountdown, useResolveOnDeadline } from "@/lib/client/useCountdown";
+import { useCountdown, usePhaseDeadline } from "@/lib/client/useCountdown";
 import { useCountdownTicks, useGameFeedback } from "@/lib/client/useGameFeedback";
 
 /**
@@ -39,8 +40,21 @@ export default function DisplayPage() {
     scrambling ? round.endsAt : null,
     serverNow,
   );
+  // The reveal's own deadline is not projected, so a short local timer fires the
+  // advance: the server still refuses until its clock agrees.
+  const revealExpired = round?.phase === "resolve";
+  const promptExpired =
+    round?.phase === "prompt" &&
+    round.promptEndsAt != null &&
+    new Date(round.promptEndsAt).getTime() <= serverNow();
 
-  useResolveOnDeadline(code, round?.id, round?.phase, expired, refetch);
+  usePhaseDeadline(
+    code,
+    round?.id,
+    round?.phase,
+    scrambling ? expired : revealExpired || promptExpired,
+    refetch,
+  );
   useGameFeedback(state, "display");
   useCountdownTicks(
     remainingSeconds,
@@ -101,8 +115,10 @@ export default function DisplayPage() {
           />
         ) : round?.phase === "prompt" ? (
           <PromptPhase state={state} serverNow={serverNow} />
-        ) : round?.phase === "resolve" || round?.phase === "done" ? (
+        ) : round?.phase === "resolve" ? (
           <Aftermath state={state} />
+        ) : round?.phase === "done" ? (
+          <Standby state={state} />
         ) : (
           <Lobby state={state} />
         )}

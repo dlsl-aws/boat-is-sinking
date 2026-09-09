@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it } from "vitest";
  * are the properties the row lock exists to preserve under concurrency.
  */
 
-const MIGRATIONS = ["0001_init.sql", "0002_rpc.sql", "0003_rounds.sql"];
+const MIGRATIONS = ["0001_init.sql", "0002_rpc.sql", "0003_rounds.sql", "0004_seats.sql", "0005_phases.sql"];
 
 type Db = PGlite;
 
@@ -256,6 +256,39 @@ describe("claim_seat", () => {
       reason: "not-playing",
     });
   });
+
+  it("still seats a player after a kick freed a seat mid-scramble", async () => {
+    // Kicking cascade-deletes the seat row, so seat_index can no longer be
+    // derived from count(*) — it would collide with a seat that still exists.
+    const { roundId, boat, playerIds } = await seedScramble(db, { capacity: 4, holders: 5 });
+    await captain(db, boat.id, playerIds[0]!);
+    await board(db, roundId, boat.code, playerIds[1]!);
+    await board(db, roundId, boat.code, playerIds[2]!);
+
+    await db.query(`delete from players where id = $1`, [playerIds[1]!]);
+
+    const result = await board(db, roundId, boat.code, playerIds[3]!);
+    expect(result).toMatchObject({ ok: true });
+
+    const seats = await db.query<{ seat_index: number }>(`select seat_index from seats`);
+    const indexes = seats.rows.map((s) => s.seat_index).sort((a, b) => a - b);
+    expect(indexes).toEqual([0, 2, 3]);
+  });
+
+  it("locks on the seat count reaching capacity, not on the seat index", async () => {
+    // With indexes outrunning positions after a kick, an index-based lock would
+    // seal a boat that still has a free seat.
+    const { roundId, boat, playerIds } = await seedScramble(db, { capacity: 3, holders: 5 });
+    await captain(db, boat.id, playerIds[0]!);
+    await board(db, roundId, boat.code, playerIds[1]!);
+    await db.query(`delete from players where id = $1`, [playerIds[1]!]);
+
+    const third = await board(db, roundId, boat.code, playerIds[2]!);
+    expect(third).toMatchObject({ ok: true, filled: 2, locked: false });
+
+    const fourth = await board(db, roundId, boat.code, playerIds[3]!);
+    expect(fourth).toMatchObject({ ok: true, filled: 3, locked: true });
+  });
 });
 
 describe("promote_auto_captains", () => {
@@ -435,7 +468,7 @@ describe("resolution", () => {
     const drowned = playerIds.slice(3);
 
     for (let i = 0; i < 3; i++) {
-      await db.query(`select apply_resolution($1, $2, $3, 'prompt', null)`, [
+      await db.query(`select apply_resolution($1, $2, $3, now() + interval '6 seconds', null)`, [
         roundId,
         survivors,
         drowned,
@@ -457,5 +490,153 @@ describe("resolution", () => {
     }
 
     expect((await db.query(`select * from eliminations`)).rows).toHaveLength(1);
+  });
+});
+
+describe("advance_phase", () => {
+  let db: Db;
+  beforeEach(async () => {
+    db = await freshDb();
+  });
+
+  /** A round already resolved and sitting in the reveal. */
+  async function seedReveal(
+    options: { revealIn?: string; promptEndsAt?: string | null } = {},
+  ) {
+    const { revealIn = "-1 second", promptEndsAt = null } = options;
+    const { roundId, playerIds } = await seedScramble(db, { capacity: 3, holders: 4 });
+    await db.query(`update rounds set ends_at = now() - interval '1 second' where id = $1`, [
+      roundId,
+    ]);
+    await db.query(`select begin_resolve($1)`, [roundId]);
+    await db.query(
+      `select apply_resolution($1, $2, $3, now() + interval '${revealIn}', ${
+        promptEndsAt === null ? "null" : `now() + interval '${promptEndsAt}'`
+      })`,
+      [roundId, playerIds.slice(0, 3), playerIds.slice(3)],
+    );
+    return { roundId, playerIds };
+  }
+
+  const advance = (roundId: string) =>
+    one<{ r: Json }>(db, `select advance_phase($1) as r`, [roundId]).then((x) => x.r);
+
+  it("leaves the round alone while the reveal is still on screen", async () => {
+    const { roundId } = await seedReveal({ revealIn: "10 seconds" });
+    expect(await advance(roundId)).toMatchObject({ moved: false, reason: "not-yet" });
+
+    const round = await one<{ phase: string }>(db, `select phase from rounds where id = $1`, [
+      roundId,
+    ]);
+    expect(round.phase).toBe("resolve");
+  });
+
+  it("moves a reveal with a planned prompt into the prompt phase", async () => {
+    const { roundId } = await seedReveal({ promptEndsAt: "45 seconds" });
+    expect(await advance(roundId)).toMatchObject({ moved: true, phase: "prompt" });
+  });
+
+  it("moves a reveal with no planned prompt straight to done", async () => {
+    const { roundId } = await seedReveal({ promptEndsAt: null });
+    expect(await advance(roundId)).toMatchObject({ moved: true, phase: "done" });
+  });
+
+  it("ends the prompt once its own deadline passes", async () => {
+    const { roundId } = await seedReveal({ promptEndsAt: "45 seconds" });
+    await advance(roundId);
+    expect(await advance(roundId)).toMatchObject({ moved: false, reason: "not-yet" });
+
+    await db.query(`update rounds set prompt_ends_at = now() - interval '1 second' where id = $1`, [
+      roundId,
+    ]);
+    expect(await advance(roundId)).toMatchObject({ moved: true, phase: "done" });
+  });
+
+  it("tells exactly one of two racing callers that it moved the round", async () => {
+    const { roundId } = await seedReveal({ promptEndsAt: null });
+    const first = await advance(roundId);
+    const second = await advance(roundId);
+    expect(first).toMatchObject({ moved: true });
+    expect(second).toMatchObject({ moved: false });
+  });
+
+  it("refuses to touch a round still scrambling", async () => {
+    const { roundId } = await seedScramble(db);
+    expect(await advance(roundId)).toMatchObject({ moved: false, reason: "wrong-phase" });
+  });
+});
+
+describe("apply_resolution", () => {
+  let db: Db;
+  beforeEach(async () => {
+    db = await freshDb();
+  });
+
+  it("lands the round in the reveal, carrying both deadlines", async () => {
+    const { roundId, playerIds } = await seedScramble(db, { capacity: 3, holders: 4 });
+    await db.query(`update rounds set ends_at = now() - interval '1 second' where id = $1`, [
+      roundId,
+    ]);
+    await db.query(`select begin_resolve($1)`, [roundId]);
+    await db.query(
+      `select apply_resolution($1, $2, $3, now() + interval '6 seconds', now() + interval '51 seconds')`,
+      [roundId, playerIds.slice(0, 3), playerIds.slice(3)],
+    );
+
+    const round = await one<{
+      phase: string;
+      reveal_gap: number;
+      prompt_gap: number;
+      resolved: boolean;
+    }>(
+      db,
+      `select phase,
+              extract(epoch from (reveal_ends_at - now()))::int as reveal_gap,
+              extract(epoch from (prompt_ends_at - now()))::int as prompt_gap,
+              resolved_at is not null as resolved
+         from rounds where id = $1`,
+      [roundId],
+    );
+    expect(round.phase).toBe("resolve");
+    expect(round.resolved).toBe(true);
+    expect(round.reveal_gap).toBeGreaterThan(3);
+    expect(round.prompt_gap).toBeGreaterThan(45);
+  });
+});
+
+describe("end_round_now", () => {
+  let db: Db;
+  beforeEach(async () => {
+    db = await freshDb();
+  });
+
+  it("pulls the deadline back so begin_resolve grants ownership immediately", async () => {
+    const { roundId, roomId } = await seedScramble(db);
+    expect(
+      (await one<{ r: Json }>(db, `select begin_resolve($1) as r`, [roundId])).r,
+    ).toMatchObject({ owned: false, reason: "not-yet" });
+
+    const ended = await one<{ r: Json }>(db, `select end_round_now($1, $2) as r`, [
+      roundId,
+      roomId,
+    ]);
+    expect(ended.r).toMatchObject({ ok: true });
+
+    expect(
+      (await one<{ r: Json }>(db, `select begin_resolve($1) as r`, [roundId])).r,
+    ).toMatchObject({ owned: true });
+  });
+
+  it("refuses a round belonging to another room", async () => {
+    const { roundId } = await seedScramble(db);
+    const other = await one<{ id: string }>(
+      db,
+      `insert into rooms (code, host_token_hash) values ('ZZZ234', 'h') returning id`,
+    );
+    const result = await one<{ r: Json }>(db, `select end_round_now($1, $2) as r`, [
+      roundId,
+      other.id,
+    ]);
+    expect(result.r).toMatchObject({ ok: false });
   });
 });

@@ -103,6 +103,7 @@ export type GameState = {
     joined: number;
     alive: number;
     eliminated: number;
+    waiting: number;
     seated: number;
     seatsAvailable: number;
   };
@@ -189,6 +190,10 @@ export async function buildGameState(
   let admin: AdminExtras | null = null;
   let self: SelfView | null = null;
 
+  // Identity, not role. A host who also joined has both, and must get their own
+  // symbol as well as the dashboard.
+  const selfPlayerId = viewer.role === "display" ? null : viewer.playerId;
+
   if (round) {
     const [{ data: boatRows }, { data: seatRows }, { data: assignmentRows }] =
       await Promise.all([
@@ -226,8 +231,8 @@ export async function buildGameState(
 
     const rows = (boatRows ?? []) as Record<string, unknown>[];
 
-    // Sorted by the symbol pool's own order so the projector's boat grid keeps
-    // a stable position per symbol instead of reshuffling on every render.
+    // Sorted by symbol id so the projector's boat grid keeps a stable position
+    // per symbol instead of reshuffling on every render.
     rows.sort((a, b) => (a.symbol_id as string).localeCompare(b.symbol_id as string));
 
     boats = rows.map((b) => {
@@ -264,20 +269,20 @@ export async function buildGameState(
       };
     }
 
-    if (viewer.role === "player") {
-      const me = players.find((p) => p.id === viewer.playerId);
+    if (selfPlayerId) {
+      const me = players.find((p) => p.id === selfPlayerId);
       const assignment = (assignmentRows ?? []).find(
-        (a) => a.player_id === viewer.playerId,
+        (a) => a.player_id === selfPlayerId,
       );
       const boatRow = assignment
         ? rows.find((b) => b.id === assignment.boat_id)
         : undefined;
       const boatId = (boatRow?.id as string | undefined) ?? null;
       const seat = boatId
-        ? seatsByBoat.get(boatId)?.find((s) => s.playerId === viewer.playerId)
+        ? seatsByBoat.get(boatId)?.find((s) => s.playerId === selfPlayerId)
         : undefined;
       const captainId = (boatRow?.captain_player_id as string | null) ?? null;
-      const isCaptain = captainId != null && captainId === viewer.playerId;
+      const isCaptain = captainId != null && captainId === selfPlayerId;
 
       if (me) {
         self = {
@@ -302,10 +307,10 @@ export async function buildGameState(
     }
   }
 
-  if (viewer.role === "player" && !self) {
+  if (selfPlayerId && !self) {
     // In the lobby, or between rounds: still return identity so the phone can
     // show who it thinks you are.
-    const me = players.find((p) => p.id === viewer.playerId);
+    const me = players.find((p) => p.id === selfPlayerId);
     if (me) {
       self = {
         playerId: me.id,
@@ -345,6 +350,7 @@ export async function buildGameState(
       joined: players.length,
       alive,
       eliminated: players.filter((p) => p.status === "eliminated").length,
+      waiting: players.filter((p) => p.status === "spectator").length,
       seated,
       seatsAvailable: boats.reduce((sum, b) => sum + b.capacity, 0),
     },

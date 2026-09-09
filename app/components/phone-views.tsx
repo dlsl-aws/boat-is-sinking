@@ -86,25 +86,34 @@ export function CodeForm({
   disabled: boolean;
 }) {
   const ready = isValidCode(entry, BOAT_CODE_LENGTH);
+  const rejected = entry.length > 0 && !ready && entry.length === BOAT_CODE_LENGTH;
   return (
-    <form onSubmit={onSubmit} className="flex gap-2">
-      <input
-        value={entry}
-        onChange={(event) =>
-          setEntry(normalizeCode(event.target.value).slice(0, BOAT_CODE_LENGTH))
-        }
-        placeholder="CODE"
-        aria-label="Lifeboat code"
-        autoCapitalize="characters"
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        className="font-display min-w-0 flex-1 rounded-2xl border-2 border-white/15 bg-black/40 px-4 py-4 text-center text-4xl font-bold tracking-[0.3em] uppercase placeholder:text-base placeholder:font-normal placeholder:tracking-normal placeholder:text-muted focus:border-gold focus:outline-none"
-      />
-      <Button type="submit" variant={ready ? "safe" : "ghost"} disabled={disabled || !ready}>
-        Board
-      </Button>
-    </form>
+    <>
+      <form onSubmit={onSubmit} className="flex gap-2">
+        <input
+          value={entry}
+          onChange={(event) =>
+            setEntry(normalizeCode(event.target.value).slice(0, BOAT_CODE_LENGTH))
+          }
+          placeholder="CODE"
+          aria-label="Lifeboat code"
+          autoCapitalize="characters"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          className="font-display min-w-0 flex-1 rounded-2xl border-2 border-white/15 bg-black/40 px-4 py-4 text-center text-4xl font-bold tracking-[0.3em] uppercase placeholder:text-base placeholder:font-normal placeholder:tracking-normal placeholder:text-muted focus:border-gold focus:outline-none"
+        />
+        <Button type="submit" variant={ready ? "safe" : "ghost"} disabled={disabled || !ready}>
+          Board
+        </Button>
+      </form>
+      {rejected && (
+        <p className="mt-2 text-sm text-mist">
+          Lifeboat codes never use O, I, L, S, B, Z, 0, 1, 2, 5 or 8 — check the
+          card again.
+        </p>
+      )}
+    </>
   );
 }
 

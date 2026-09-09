@@ -41,7 +41,6 @@ export function QrCode({ url, size = 320 }: { url: string; size?: number }) {
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={dataUrl}
       alt={`QR code to join at ${url}`}

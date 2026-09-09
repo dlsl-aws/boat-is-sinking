@@ -10,6 +10,7 @@ import {
   PromptPhase,
   Scramble,
   Shell,
+  Standby,
   Winners,
 } from "@/app/components/display-views";
 import { CodeCard, TimeBar } from "@/app/components/phone-views";
@@ -79,7 +80,7 @@ function mockState(overrides: Partial<ClientState> = {}): ClientState {
       captainName: i === 4 ? null : NAMES[i * 3]!,
       hasCaptain: i !== 4,
     })),
-    counts: { joined: 24, alive: 20, eliminated: 4, seated: 10, seatsAvailable: 20 },
+    counts: { joined: 24, alive: 20, eliminated: 4, waiting: 0, seated: 10, seatsAvailable: 20 },
     self: null,
     admin: null,
     serverTime: new Date().toISOString(),
@@ -95,6 +96,7 @@ type Scene =
   | "scramble-calm"
   | "scramble-urgent"
   | "aftermath"
+  | "standby"
   | "prompt"
   | "winners";
 
@@ -105,6 +107,7 @@ const SCENES: { id: Scene; label: string }[] = [
   { id: "scramble-calm", label: "Scramble" },
   { id: "scramble-urgent", label: "Scramble · final 10s" },
   { id: "aftermath", label: "Reveal" },
+  { id: "standby", label: "Between rounds" },
   { id: "prompt", label: "Icebreaker" },
   { id: "winners", label: "Winners" },
 ];
@@ -121,7 +124,7 @@ export default function PreviewPage() {
   const lobbyState = mockState({
     room: { ...mockState().room, status: "lobby" },
     players: mockPlayers(14),
-    counts: { joined: 14, alive: 14, eliminated: 0, seated: 0, seatsAvailable: 0 },
+    counts: { joined: 14, alive: 14, eliminated: 0, waiting: 0, seated: 0, seatsAvailable: 0 },
     round: null,
   });
 
@@ -133,7 +136,7 @@ export default function PreviewPage() {
   const winnersState = mockState({
     room: { ...mockState().room, status: "finished" },
     players: mockPlayers(20, 2),
-    counts: { joined: 20, alive: 2, eliminated: 18, seated: 0, seatsAvailable: 0 },
+    counts: { joined: 20, alive: 2, eliminated: 18, waiting: 0, seated: 0, seatsAvailable: 0 },
     round: { ...mockState().round!, roundIndex: 6, phase: "done" },
   });
 
@@ -180,6 +183,7 @@ export default function PreviewPage() {
             />
           )}
           {scene === "aftermath" && <Aftermath state={aftermathState} />}
+          {scene === "standby" && <Standby state={aftermathState} />}
           {scene === "prompt" && <PromptPhase state={mockState()} serverNow={serverNow} />}
           {scene === "winners" && <Winners state={winnersState} />}
         </Shell>

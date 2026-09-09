@@ -1,11 +1,40 @@
+# Dependencies
 node_modules/
+
+# Next.js build output
 .next/
 out/
 build/
-.env
-.env.local
-.env*.local
-*.tsbuildinfo
 next-env.d.ts
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Secrets.
+# Every env file is ignored except the committed template — a new clone copies
+# .env.example to .env.local and fills it in. SUPABASE_SERVICE_ROLE_KEY bypasses
+# row-level security, so it must never reach the repository.
+.env
+.env.*
+!.env.example
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Deployment
 .vercel
+
+# Editor and agent scratch
+.claude/
+.superpowers/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
 .DS_Store
+Thumbs.db

@@ -84,6 +84,8 @@ export const gameEventSchema = z.discriminatedUnion("type", [
     promptId: z.string(),
     endsAt: z.string(),
   }),
+  /** A round is fully over — reveal and icebreaker both finished. */
+  z.object({ type: z.literal("round:done"), roundId: z.string() }),
   z.object({ type: z.literal("game:over") }),
 ]);
 
@@ -96,6 +98,7 @@ export const REFETCH_EVENTS = new Set<GameEvent["type"]>([
   "boat:captain",
   "round:resolved",
   "prompt:started",
+  "round:done",
   "game:over",
 ]);
 

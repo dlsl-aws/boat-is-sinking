@@ -11,8 +11,9 @@ import {
   SymbolBadge,
 } from "@/app/components/ui";
 import { QrCode } from "@/app/components/QrCode";
+import { SettingsPanel } from "@/app/components/SettingsPanel";
 import { useGameState, type ClientState } from "@/lib/client/useGameState";
-import { useCountdown, useResolveOnDeadline } from "@/lib/client/useCountdown";
+import { useCountdown, usePhaseDeadline } from "@/lib/client/useCountdown";
 import { evaluateRound, projectGame } from "@/lib/game/plan";
 import { useGameFeedback } from "@/lib/client/useGameFeedback";
 
@@ -33,7 +34,7 @@ export default function AdminPage() {
     round?.phase === "scramble" ? round.endsAt : null,
     serverNow,
   );
-  useResolveOnDeadline(code, round?.id, round?.phase, expired, refetch);
+  usePhaseDeadline(code, round?.id, round?.phase, expired, refetch);
   useGameFeedback(state, "display");
 
   if (error === "no-such-room") {
@@ -73,6 +74,7 @@ export default function AdminPage() {
       />
       <Counts state={state} />
       <Controls code={code} state={state} onChanged={refetch} />
+      <SettingsPanel code={code} state={state} onChanged={refetch} />
       {round && round.phase === "scramble" && <BoatGrid state={state} />}
       <Roster code={code} state={state} onChanged={refetch} />
       <Plan state={state} />
@@ -152,6 +154,7 @@ function Counts({ state }: { state: ClientState }) {
     { label: "Joined", value: state.counts.joined, tone: "" },
     { label: "Still alive", value: state.counts.alive, tone: "text-safe" },
     { label: "Eliminated", value: state.counts.eliminated, tone: "text-danger" },
+    { label: "Waiting", value: state.counts.waiting, tone: "text-gold" },
     {
       label: "Seated",
       value: state.round?.phase === "scramble"
@@ -162,7 +165,7 @@ function Counts({ state }: { state: ClientState }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
       {tiles.map((tile) => (
         <Panel key={tile.label} className="text-center">
           <p className={`text-4xl font-black tabular-nums ${tile.tone}`}>{tile.value}</p>

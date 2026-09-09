@@ -13,7 +13,7 @@ import {
 import { Confetti } from "@/app/components/Confetti";
 import { CodeCard, CodeForm, TimeBar } from "@/app/components/phone-views";
 import { useGameState } from "@/lib/client/useGameState";
-import { useCountdown, useResolveOnDeadline } from "@/lib/client/useCountdown";
+import { useCountdown, usePhaseDeadline } from "@/lib/client/useCountdown";
 import { useCountdownTicks, useGameFeedback } from "@/lib/client/useGameFeedback";
 import { getSymbol } from "@/lib/game/symbols";
 
@@ -24,12 +24,15 @@ export default function PlayPage() {
 
   const round = state?.round ?? null;
   const self = state?.self ?? null;
-  const { remainingSeconds, expired } = useCountdown(
-    round?.phase === "scramble" ? round.endsAt : null,
-    serverNow,
-  );
+  const phaseDeadline =
+    round?.phase === "scramble"
+      ? round.endsAt
+      : round?.phase === "prompt"
+        ? round.promptEndsAt
+        : null;
+  const { remainingSeconds, expired } = useCountdown(phaseDeadline, serverNow);
 
-  useResolveOnDeadline(code, round?.id, round?.phase, expired, refetch);
+  usePhaseDeadline(code, round?.id, round?.phase, expired, refetch);
   useGameFeedback(state, "player");
   useCountdownTicks(
     remainingSeconds,

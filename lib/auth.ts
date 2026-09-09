@@ -60,7 +60,14 @@ export async function clearPlayerToken(code: string): Promise<void> {
 }
 
 /** Who is asking, which decides how much of the game state they get to see. */
+/**
+ * Role decides privileges; `playerId` decides identity. They are independent,
+ * because a facilitator can host a room AND play in it — testing on their own
+ * phone, or running a small session they are also part of. Collapsing the two
+ * is what previously left such a host with no identity at all, so their phone
+ * showed the join screen forever however many times they joined.
+ */
 export type Viewer =
-  | { role: "host" }
+  | { role: "host"; playerId: string | null }
   | { role: "player"; playerId: string }
   | { role: "display" };

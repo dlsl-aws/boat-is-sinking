@@ -64,6 +64,8 @@ In the Supabase SQL editor, run these in order:
 supabase/migrations/0001_init.sql
 supabase/migrations/0002_rpc.sql
 supabase/migrations/0003_rounds.sql
+supabase/migrations/0004_seats.sql
+supabase/migrations/0005_phases.sql
 ```
 
 ### 3. Configure the environment
@@ -215,7 +217,7 @@ Not linked from anywhere in the game; it costs one static route.
 npm test
 ```
 
-57 tests. The interesting ones:
+75 tests. The interesting ones:
 
 - **`lib/db/rpc.test.ts`** runs the migrations against real Postgres (PGlite,
   compiled to WASM) and exercises the N+1 race: six players holding one symbol,
@@ -237,6 +239,15 @@ concurrency.
 
 ---
 
+## Lint
+
+There is currently no `npm run lint` script. TypeScript-ESLint does not yet support
+TypeScript 7 (tracking issue [typescript-eslint#10940](https://github.com/typescript-eslint/typescript-eslint/issues/10940)),
+so ESLint cannot run on this codebase until it does. The `npm run typecheck` command
+covers type correctness.
+
+---
+
 ## Running a session
 
 1. Open `/admin`, hit **Create a room**, open the projector view on the big screen.
@@ -254,6 +265,9 @@ Facilitator notes:
 - **Reset** keeps everyone and starts a fresh game — useful between cohorts.
 - The **If you start now** panel projects the remaining rounds and rough
   duration, so you can see before starting whether it fits your slot.
+- The **Settings** panel on the dashboard adjusts round timings and other
+  parameters mid-session, and a short reveal animation plays between the
+  scramble and the icebreaker.
 
 ---
 
