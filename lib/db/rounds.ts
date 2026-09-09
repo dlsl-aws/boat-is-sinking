@@ -6,8 +6,8 @@ import { suggestShape } from "../game/plan";
 import { generateDistinctBoatCodes } from "../game/codes";
 import { nextPrompt } from "../game/prompts";
 import { resolveRound, type ResolvableBoat } from "../game/resolve";
+import { planPostRound } from "../game/postround";
 import { broadcast } from "../realtime/broadcast";
-import type { GameEvent } from "../realtime/events";
 
 type RoomRow = {
   id: string;
@@ -127,7 +127,10 @@ export async function startRound(
  * backgrounded, and it cannot be resolved early by a client with a fast clock —
  * the deadline check lives in the database.
  */
-export async function maybeResolveRound(room: RoomRow): Promise<boolean> {
+export async function maybeResolveRound(
+  room: RoomRow,
+  options: { skipClockPrecheck?: boolean } = {},
+): Promise<boolean> {
   if (!room.current_round_id) return false;
   const supabase = db();
   const config = parseConfig(room.config);
@@ -140,7 +143,14 @@ export async function maybeResolveRound(room: RoomRow): Promise<boolean> {
 
   if (!roundRow) return false;
   if (roundRow.phase !== "scramble") return false;
-  if (new Date(roundRow.ends_at as string).getTime() > Date.now()) return false;
+  // A cheap filter only. The database clock is the authority, so the forced
+  // path skips this rather than comparing two clocks that may disagree.
+  if (
+    !options.skipClockPrecheck &&
+    new Date(roundRow.ends_at as string).getTime() > Date.now()
+  ) {
+    return false;
+  }
 
   const { data: owned } = await supabase.rpc("begin_resolve", {
     p_round_id: roundRow.id,
@@ -176,37 +186,10 @@ export async function maybeResolveRound(room: RoomRow): Promise<boolean> {
   const resolution = resolveRound(alivePlayerIds, boats, config.underfilledBoatPolicy);
 
   // Only run a prompt if someone is left to talk to someone else.
-  const anyLockedBoat = resolution.boats.some((b) => !b.sank && b.survivorIds.length > 1);
-  const runPrompt =
-    config.promptsEnabled && roundRow.prompt_id != null && anyLockedBoat;
+  const talkingBoatCount = resolution.boats.filter(
+    (b) => !b.sank && b.survivorIds.length > 1,
+  ).length;
 
-  const promptEndsAt = runPrompt
-    ? new Date(Date.now() + config.promptDurationSeconds * 1000).toISOString()
-    : null;
-
-  const { error } = await supabase.rpc("apply_resolution", {
-    p_round_id: roundRow.id,
-    p_survivor_ids: resolution.survivorIds,
-    p_eliminated_ids: resolution.eliminatedIds,
-    p_next_phase: runPrompt ? "prompt" : "done",
-    p_prompt_ends_at: promptEndsAt,
-  });
-  if (error) throw new Error(`apply_resolution failed: ${error.message}`);
-
-  const events: GameEvent[] = [
-    { type: "round:resolved", roundId: roundRow.id as string },
-  ];
-
-  if (runPrompt && promptEndsAt) {
-    events.push({
-      type: "prompt:started",
-      roundId: roundRow.id as string,
-      promptId: roundRow.prompt_id as string,
-      endsAt: promptEndsAt,
-    });
-  }
-
-  // The game is over when no further round could thin the field.
   const survivors = resolution.survivorIds.length;
   const nextShape = suggestShape(survivors, room.initial_alive ?? survivors, {
     minGroupSize: config.minGroupSize,
@@ -214,12 +197,117 @@ export async function maybeResolveRound(room: RoomRow): Promise<boolean> {
     targetWinners: config.targetWinners,
   });
 
-  if (survivors <= config.targetWinners || !nextShape) {
-    await supabase.rpc("finish_game", { p_room_id: room.id });
-    events.push({ type: "game:over" });
+  // Decided together, before anything is written: a round that ends the game
+  // must not also start an icebreaker.
+  const { runPrompt } = planPostRound({
+    survivorCount: survivors,
+    talkingBoatCount,
+    targetWinners: config.targetWinners,
+    promptsEnabled: config.promptsEnabled,
+    hasPromptId: roundRow.prompt_id != null,
+    nextShape,
+  });
+
+  const revealEndsAt = new Date(
+    Date.now() + config.revealDurationSeconds * 1000,
+  ).toISOString();
+  const promptEndsAt = runPrompt
+    ? new Date(
+        Date.now() + (config.revealDurationSeconds + config.promptDurationSeconds) * 1000,
+      ).toISOString()
+    : null;
+
+  const { error } = await supabase.rpc("apply_resolution", {
+    p_round_id: roundRow.id,
+    p_survivor_ids: resolution.survivorIds,
+    p_eliminated_ids: resolution.eliminatedIds,
+    p_reveal_ends_at: revealEndsAt,
+    p_prompt_ends_at: promptEndsAt,
+  });
+  if (error) throw new Error(`apply_resolution failed: ${error.message}`);
+
+  // The round now sits in its reveal. `maybeAdvancePhase` carries it onward;
+  // the game is not finished here, or the reveal would never be seen.
+  await broadcast(room.id, { type: "round:resolved", roundId: roundRow.id as string });
+  return true;
+}
+
+/**
+ * Carry a round from its reveal into the icebreaker, and out the other side.
+ *
+ * The same opportunistic pattern as resolution, for the same reason: serverless
+ * has no background worker, so a deadline is only noticed because a client
+ * asked. `advance_phase` reads every deadline off the row and tells exactly one
+ * caller it moved the round, so a room full of phones produces one transition
+ * and one broadcast.
+ */
+export async function maybeAdvancePhase(room: RoomRow): Promise<boolean> {
+  if (!room.current_round_id) return false;
+  const supabase = db();
+  const config = parseConfig(room.config);
+
+  const { data: roundRow } = await supabase
+    .from("rounds")
+    .select("id, phase, prompt_id")
+    .eq("id", room.current_round_id)
+    .maybeSingle();
+
+  if (!roundRow) return false;
+  const phase = roundRow.phase as string;
+  if (phase !== "resolve" && phase !== "prompt") return false;
+
+  const { data } = await supabase.rpc("advance_phase", { p_round_id: roundRow.id });
+  const result = data as { moved: boolean; phase?: string } | null;
+  if (!result?.moved) return false;
+
+  const roundId = roundRow.id as string;
+
+  if (result.phase === "prompt") {
+    const { data: fresh } = await supabase
+      .from("rounds")
+      .select("prompt_ends_at")
+      .eq("id", roundId)
+      .maybeSingle();
+    await broadcast(room.id, {
+      type: "prompt:started",
+      roundId,
+      promptId: roundRow.prompt_id as string,
+      endsAt: (fresh?.prompt_ends_at as string) ?? new Date().toISOString(),
+    });
+    return true;
   }
 
-  for (const event of events) await broadcast(room.id, event);
+  await broadcast(room.id, { type: "round:done", roundId });
+
+  // The game is over when no further round could thin the field. Recomputed
+  // from the same pure function the resolution used, so the two cannot disagree.
+  const { data: aliveRows } = await supabase
+    .from("players")
+    .select("id")
+    .eq("room_id", room.id)
+    .eq("status", "alive");
+
+  const survivors = (aliveRows ?? []).length;
+  const nextShape = suggestShape(survivors, room.initial_alive ?? survivors, {
+    minGroupSize: config.minGroupSize,
+    maxGroupSize: config.maxGroupSize,
+    targetWinners: config.targetWinners,
+  });
+
+  const { gameEnding } = planPostRound({
+    survivorCount: survivors,
+    talkingBoatCount: 0,
+    targetWinners: config.targetWinners,
+    promptsEnabled: config.promptsEnabled,
+    hasPromptId: false,
+    nextShape,
+  });
+
+  if (gameEnding) {
+    await supabase.rpc("finish_game", { p_room_id: room.id });
+    await broadcast(room.id, { type: "game:over" });
+  }
+
   return true;
 }
 
