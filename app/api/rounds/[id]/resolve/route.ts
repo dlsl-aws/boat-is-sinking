@@ -39,10 +39,15 @@ export async function POST(
     const viewer = await resolveViewer(room);
     if (viewer.role !== "host") return fail("not-the-host", 403);
     // Written by Postgres, because Postgres is what checks it.
-    await db().rpc("end_round_now", {
+    const { data, error } = await db().rpc("end_round_now", {
       p_round_id: roundId,
       p_room_id: room.id,
     });
+    // The host is standing in front of a room. Silence is the worst answer.
+    // If ok: false, the round is no longer in scramble or doesn't belong to this room.
+    if (error || !data?.ok) {
+      return fail("cannot-end-round", 409, { message: "That round is no longer running." });
+    }
     forced = true;
   }
 
