@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Panel } from "@/app/components/ui";
 import type { ClientState } from "@/lib/client/useGameState";
 import type { RoomConfig } from "@/lib/config";
@@ -37,6 +37,8 @@ const TOGGLE_FIELDS: ToggleField[] = [
   { key: "soundEnabled", label: "Sound", hint: "Bell, klaxon and countdown" },
 ];
 
+type SaveState = "idle" | "saving" | "saved";
+
 export function SettingsPanel({
   code,
   state,
@@ -49,10 +51,43 @@ export function SettingsPanel({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
   const config = state.room.config;
+
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const field of NUMBER_FIELDS) {
+      initial[field.key] = String(config[field.key] as number);
+    }
+    return initial;
+  });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const focusedField = useRef<string | null>(null);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Re-sync a field's draft from config when config changes, but only while
+  // that field isn't being actively edited — a background refetch should
+  // never yank text out from under someone mid-type.
+  useEffect(() => {
+    setDrafts((prev) => {
+      const next = { ...prev };
+      for (const field of NUMBER_FIELDS) {
+        if (focusedField.current === field.key) continue;
+        next[field.key] = String(config[field.key] as number);
+      }
+      return next;
+    });
+  }, [config]);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+    };
+  }, []);
 
   async function save(patch: Partial<RoomConfig>) {
     setBusy(true);
+    setSaveState("saving");
     setError(null);
     try {
       const response = await fetch(`/api/rooms/${code}/config`, {
@@ -63,12 +98,36 @@ export function SettingsPanel({
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
         setError(body?.error ?? "Could not save that.");
+        setSaveState("idle");
+      } else {
+        setSaveState("saved");
+        if (savedTimer.current) clearTimeout(savedTimer.current);
+        savedTimer.current = setTimeout(() => setSaveState("idle"), 1500);
       }
     } catch {
       setError("No connection.");
+      setSaveState("idle");
     }
     setBusy(false);
     onChanged();
+  }
+
+  function commitNumberField(field: NumberField, rawValue: string) {
+    const value = Number(rawValue);
+    if (rawValue.trim() === "" || !Number.isInteger(value) || value < field.min || value > field.max) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        [field.key]: `Between ${field.min} and ${field.max} ${field.hint}`,
+      }));
+      return;
+    }
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next[field.key];
+      return next;
+    });
+    if (value === config[field.key]) return;
+    void save({ [field.key]: value } as Partial<RoomConfig>);
   }
 
   if (!open) {
@@ -84,8 +143,10 @@ export function SettingsPanel({
 
   return (
     <Panel className="flex flex-col gap-4">
-      <div className="flex items-center">
+      <div className="flex items-center gap-3">
         <h2 className="font-bold">Settings</h2>
+        {saveState === "saving" && <span className="text-sm text-muted">Saving…</span>}
+        {saveState === "saved" && <span className="text-sm text-muted">Saved</span>}
         <span className="flex-1" />
         <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Done
@@ -101,22 +162,29 @@ export function SettingsPanel({
               min={field.min}
               max={field.max}
               disabled={busy}
-              defaultValue={config[field.key] as number}
-              onBlur={(event) => {
-                const value = Number(event.target.value);
-                if (
-                  !Number.isInteger(value) ||
-                  value < field.min ||
-                  value > field.max ||
-                  value === config[field.key]
-                ) {
-                  return;
+              value={drafts[field.key] ?? ""}
+              onFocus={() => {
+                focusedField.current = field.key;
+              }}
+              onChange={(event) => {
+                const raw = event.target.value;
+                setDrafts((prev) => ({ ...prev, [field.key]: raw }));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.currentTarget.blur();
                 }
-                void save({ [field.key]: value } as Partial<RoomConfig>);
+              }}
+              onBlur={(event) => {
+                focusedField.current = null;
+                commitNumberField(field, event.target.value);
               }}
               className="rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 text-base"
             />
             <span className="text-xs text-muted">{field.hint}</span>
+            {fieldErrors[field.key] && (
+              <span className="text-xs text-danger">{fieldErrors[field.key]}</span>
+            )}
           </label>
         ))}
       </div>
