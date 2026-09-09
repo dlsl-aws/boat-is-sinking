@@ -25,17 +25,12 @@ export function joinUrlFor(code: string): string {
  * authenticates at all.
  */
 export async function resolveViewer(room: RoomRow): Promise<Viewer> {
-  const hostToken = await getHostToken(room.code);
-  if (hostToken) {
-    const { data } = await db()
-      .from("rooms")
-      .select("id")
-      .eq("id", room.id)
-      .eq("host_token_hash", await hashToken(hostToken))
-      .maybeSingle();
-    if (data) return { role: "host" };
-  }
-
+  // Identity is resolved first and independently of role, because the two are
+  // different questions. A facilitator who hosts a room and also joins it must
+  // keep the dashboard AND get their own symbol; returning early on the host
+  // cookie used to leave them with no identity, so `self` was null and their
+  // phone offered the join screen again after every successful join.
+  let playerId: string | null = null;
   const playerToken = await getPlayerToken(room.code);
   if (playerToken) {
     const { data } = await db()
@@ -44,8 +39,21 @@ export async function resolveViewer(room: RoomRow): Promise<Viewer> {
       .eq("room_id", room.id)
       .eq("session_token_hash", await hashToken(playerToken))
       .maybeSingle();
-    if (data) return { role: "player", playerId: data.id as string };
+    playerId = (data?.id as string | undefined) ?? null;
   }
+
+  const hostToken = await getHostToken(room.code);
+  if (hostToken) {
+    const { data } = await db()
+      .from("rooms")
+      .select("id")
+      .eq("id", room.id)
+      .eq("host_token_hash", await hashToken(hostToken))
+      .maybeSingle();
+    if (data) return { role: "host", playerId };
+  }
+
+  if (playerId) return { role: "player", playerId };
 
   return { role: "display" };
 }
