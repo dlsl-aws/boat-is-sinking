@@ -12,14 +12,9 @@ export const roomConfigSchema = z.object({
   /** Length of the scramble. 45s is enough to cross a room and find a person. */
   roundDurationSeconds: z.number().int().min(10).max(300).default(45),
   promptDurationSeconds: z.number().int().min(10).max(300).default(45),
+  /** How long the overboard reveal holds the screen before the icebreaker. */
+  revealDurationSeconds: z.number().int().min(2).max(30).default(6),
   promptsEnabled: z.boolean().default(true),
-
-  /**
-   * Let the planner choose each round's shape. Turning this off hands the
-   * facilitator the group size directly, with a warning when their choice would
-   * eliminate nobody.
-   */
-  autoPlan: z.boolean().default(true),
   minGroupSize: z.number().int().min(2).max(8).default(2),
   maxGroupSize: z.number().int().min(2).max(8).default(6),
   targetWinners: z.number().int().min(1).max(10).default(2),
@@ -36,7 +31,6 @@ export const roomConfigSchema = z.object({
 
   allowLateJoin: z.boolean().default(true),
   soundEnabled: z.boolean().default(true),
-  profanityFilter: z.boolean().default(true),
 });
 
 export type RoomConfig = z.infer<typeof roomConfigSchema>;
