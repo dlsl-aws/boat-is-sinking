@@ -68,6 +68,11 @@ export function Lobby({ state }: { state: ClientState }) {
             </>
           )}
         </p>
+        {state.counts.waiting > 0 && (
+          <p className="font-display mb-[1vh] text-center text-[1.6vw] text-gold">
+            {state.counts.waiting} waiting for the next round
+          </p>
+        )}
 
         <div className="stagger flex flex-wrap justify-center gap-[0.8vw]">
           {state.players.map((player) => (
@@ -320,6 +325,11 @@ export function Standby({ state }: { state: ClientState }) {
         {alive} still afloat
       </p>
       <p className="mt-[3vh] text-[2vw] text-mist">Next round coming up…</p>
+      {state.counts.waiting > 0 && (
+        <p className="mt-[2vh] text-[1.6vw] text-gold">
+          {state.counts.waiting} waiting to play
+        </p>
+      )}
     </div>
   );
 }

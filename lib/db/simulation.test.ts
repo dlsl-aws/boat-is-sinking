@@ -301,4 +301,41 @@ describe("full game simulation", () => {
       }
     }
   }, 120_000);
+
+  it("brings a mid-game joiner into the next round", async () => {
+    // The bug this guards: a late joiner was parked as a spectator and nothing
+    // ever promoted them, so the phone's "You're up next round" was a lie and
+    // they sat out the whole game.
+    const db = await freshDb();
+    const room = (
+      await db.query<{ id: string }>(
+        `insert into rooms (code, host_token_hash) values ('LATE24', 'h') returning id`,
+      )
+    ).rows[0]!;
+    await db.query(
+      `insert into players (room_id, display_name, name_key, avatar_seed, avatar_color, session_token_hash, status)
+       values ($1, 'Latecomer', 'latecomer', '0', '#fff', 'tok-late', 'spectator')`,
+      [room.id],
+    );
+
+    // BEFORE: the query that builds a round only ever selects status = 'alive',
+    // so a spectator must not show up in it yet.
+    const beforeAlive = await db.query<{ count: number }>(
+      `select count(*)::int as count from players where room_id = $1 and status = 'alive'`,
+      [room.id],
+    );
+    expect(beforeAlive.rows[0]!.count).toBe(0);
+
+    await db.query(
+      `update players set status = 'alive' where room_id = $1 and status = 'spectator'`,
+      [room.id],
+    );
+
+    // AFTER: the same query now finds them.
+    const alive = await db.query<{ count: number }>(
+      `select count(*)::int as count from players where room_id = $1 and status = 'alive'`,
+      [room.id],
+    );
+    expect(alive.rows[0]!.count).toBe(1);
+  });
 });

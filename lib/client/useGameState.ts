@@ -106,7 +106,10 @@ export function useGameState(code: string) {
                   displayName: event.displayName,
                   avatarSeed: event.avatarSeed,
                   avatarColor: event.avatarColor,
-                  status: "alive" as const,
+                  status:
+                    current.room.status === "lobby"
+                      ? ("alive" as const)
+                      : ("spectator" as const),
                   roundsSurvived: 0,
                   eliminatedRound: null,
                 },
@@ -114,7 +117,12 @@ export function useGameState(code: string) {
               counts: {
                 ...current.counts,
                 joined: current.counts.joined + 1,
-                alive: current.counts.alive + 1,
+                // A mid-game joiner is waiting, not playing. Counting them as
+                // alive made the projector overstate the room until the next
+                // refetch.
+                ...(current.room.status === "lobby"
+                  ? { alive: current.counts.alive + 1 }
+                  : { waiting: current.counts.waiting + 1 }),
               },
             };
           }

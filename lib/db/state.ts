@@ -103,6 +103,7 @@ export type GameState = {
     joined: number;
     alive: number;
     eliminated: number;
+    waiting: number;
     seated: number;
     seatsAvailable: number;
   };
@@ -226,8 +227,8 @@ export async function buildGameState(
 
     const rows = (boatRows ?? []) as Record<string, unknown>[];
 
-    // Sorted by the symbol pool's own order so the projector's boat grid keeps
-    // a stable position per symbol instead of reshuffling on every render.
+    // Sorted by symbol id so the projector's boat grid keeps a stable position
+    // per symbol instead of reshuffling on every render.
     rows.sort((a, b) => (a.symbol_id as string).localeCompare(b.symbol_id as string));
 
     boats = rows.map((b) => {
@@ -345,6 +346,7 @@ export async function buildGameState(
       joined: players.length,
       alive,
       eliminated: players.filter((p) => p.status === "eliminated").length,
+      waiting: players.filter((p) => p.status === "spectator").length,
       seated,
       seatsAvailable: boats.reduce((sum, b) => sum + b.capacity, 0),
     },

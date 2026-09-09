@@ -37,6 +37,15 @@ export async function startRound(
   const supabase = db();
   const config = parseConfig(room.config);
 
+  // Anyone who joined mid-game has been waiting as a spectator. They join the
+  // round that is about to be built — which is what their phone has been
+  // promising them — so promotion must happen before the alive list is read.
+  await supabase
+    .from("players")
+    .update({ status: "alive" })
+    .eq("room_id", room.id)
+    .eq("status", "spectator");
+
   const { data: aliveRows } = await supabase
     .from("players")
     .select("id")

@@ -152,6 +152,7 @@ function Counts({ state }: { state: ClientState }) {
     { label: "Joined", value: state.counts.joined, tone: "" },
     { label: "Still alive", value: state.counts.alive, tone: "text-safe" },
     { label: "Eliminated", value: state.counts.eliminated, tone: "text-danger" },
+    { label: "Waiting", value: state.counts.waiting, tone: "text-gold" },
     {
       label: "Seated",
       value: state.round?.phase === "scramble"
@@ -162,7 +163,7 @@ function Counts({ state }: { state: ClientState }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
       {tiles.map((tile) => (
         <Panel key={tile.label} className="text-center">
           <p className={`text-4xl font-black tabular-nums ${tile.tone}`}>{tile.value}</p>
