@@ -22,7 +22,7 @@ import { seededRng } from "../game/rng";
  * and sometimes never board at all.
  */
 
-const MIGRATIONS = ["0001_init.sql", "0002_rpc.sql", "0003_rounds.sql", "0004_seats.sql"];
+const MIGRATIONS = ["0001_init.sql", "0002_rpc.sql", "0003_rounds.sql", "0004_seats.sql", "0005_phases.sql"];
 
 async function freshDb(): Promise<PGlite> {
   const db = new PGlite();
@@ -202,7 +202,7 @@ async function playGame(db: PGlite, options: SimOptions) {
 
     const resolution = resolveRound(alivePlayerIds, resolvable, "lenient");
 
-    await db.query(`select apply_resolution($1, $2, $3, 'done', null)`, [
+    await db.query(`select apply_resolution($1, $2, $3, now(), null)`, [
       roundId,
       resolution.survivorIds,
       resolution.eliminatedIds,
